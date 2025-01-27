@@ -1,0 +1,21 @@
+---
+title: "About"
+---
+
+
+## Working Directory
+
+```{r}
+getwd()
+```
+
+## R DESCRIPTION
+```{r}
+desc::desc()
+```
+
+
+## R Environment
+```{r}
+devtools::session_info()
+```

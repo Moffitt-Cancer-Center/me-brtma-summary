@@ -1,0 +1,1146 @@
+---
+title: "Analysis"
+format: 
+  html:
+    embed-resources: true
+    code-fold: true
+    toc: true
+---
+
+
+# Overview
+
+The goal of this document is to generate the findings for the ME-BRTMA paper for ER, PR, HER2, Ki67 and PAM50 scores. Of note, the data has been pre-processed via R script in the directory `data-raw`, resulting in a
+table `data/brtma.rds` that will be used for figures/graphs in this document.
+
+
+# TMA Cohort
+```{r}
+#| label: setup
+
+brtma <- readRDS(here::here("data/brtma.rds"))
+
+```
+
+There is limited clinical information used in this paper for the cohort, so instead of a typical Table 1, we provide an overview of all of the scores used in the paper separated out by cohort (@tbl-overall-summary).
+
+```{r}
+#| label: tbl-overall-summary
+#| tbl-cap: Overall summary of ER/PR/HER2 and combinations of stains (clinical and TMA).
+gtsummary::tbl_summary(
+  brtma,
+  include = c(
+    "er_percent_positive",
+    "er_category",
+    "Clinical ER",
+    "pr_percent_positive",
+    "pr_category",
+    "Clinical PR",
+    "hr_category",
+    "Clinical HR",
+    "her2_score",
+    "her2_category",
+    "Clinical HER2 IHC",
+    "tnbc_category",
+    "Clinical TNBC",
+    "ki67_percent_positive",
+    "ki67_category"
+  ),
+  by = "cohort"
+) |>
+  gtsummary::add_n() |>
+  gtsummary::add_p(test.args=list(
+    # The parameters below allow the fisher's exact test to succeed,
+    # however these are rather large. For the sake of performance,
+    # we instead just use simulations.
+    #"tnbc_category" ~ list(workspace=2e7),
+    #"Clinical TNBC" ~ list(workspace=2e8)
+    "tnbc_category" ~ list(simulate.p.value=TRUE, B = 10000),
+    "Clinical TNBC" ~ list(simulate.p.value=TRUE, B = 10000)
+  ))
+
+```
+
+
+# ER
+
+The ER categorization is shown with respect to cohorts in @tbl-er-summary. A stacked barplot of the proportions of each ER category
+are shown (by cohort) in @fig-er-barplot. The comparison of the Clinical ER calls vs. the TMA stain evaluation is shown in @tbl-clinical-er-vs-tma. The Cohen's kappa for clinical vs. TMA evaluation indicates good agreement (see below).
+
+```{r}
+vcd::Kappa(table(na.omit(data.frame(brtma$er_category, brtma$`Clinical ER`))))
+```
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+
+
+## Summary of ER Evaluation
+```{r}
+#| label: tbl-er-summary
+#| tbl-cap: Summary of ER stain evaluation by cohort.
+#| 
+
+er_summary_table <- gtsummary::tbl_summary(
+  brtma, 
+  by="cohort", 
+  include="er_category",
+  label=list("er_category"="ER"),
+  missing_text="Not Evaluable",
+  percent="column"
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cohort**"
+  ) |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_p() 
+
+er_summary_table
+
+```
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  er_summary_table, 
+  file = here::here("delivery/er_summary_table.xlsx")
+)
+gtsummary::as_flex_table(er_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/er_summary_table.docx"))
+```
+
+## Barplot of ER Frequencies
+```{r}
+#| label: fig-er-barplot
+#| fig-cap: Barplot of frequencies of ER status based on cohort.
+
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  tidyr::drop_na(brtma, er_category),
+  ggplot2::aes(x=cohort,fill=er_category)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  # Use RColorBrewer Set1 colors.
+  ggplot2::scale_fill_brewer(palette = "Set1") +
+  ggplot2::xlab("ER Expression per cohort") +
+  ggplot2::labs(caption = "p = 0.001, Fisher's exact test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+p
+```
+
+```{r}
+png(file = here::here("delivery/er_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/er_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+
+## Clinical ER call vs TMA stain
+```{r}
+#| label: tbl-clinical-er-vs-tma
+#| tbl-cap: Comparison of Clinical ER calls vs. TMA stain evaluations.
+
+er_vs_clinical_table <- brtma |>
+  dplyr::filter(!is.na(er_category), !is.na(`Clinical ER`))
+
+er_clinical_vs_tma <- gtsummary::tbl_summary(
+  er_vs_clinical_table,
+  include = "er_category",
+  by = "Clinical ER",
+  label = list("er_category"="Individual Core ER Result")
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cores with a Documented<br>Clinical ER Result**"
+  ) |>
+  gtsummary::bold_labels() 
+
+
+
+er_clinical_vs_tma 
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  er_clinical_vs_tma , 
+  file = here::here("delivery/er_clinical_vs_tma.xlsx")
+)
+gtsummary::as_flex_table(er_clinical_vs_tma ) |>
+  flextable::save_as_docx(path=here::here("delivery/er_clinical_vs_tma.docx"))
+```
+
+
+# PR
+
+The PR categorization is shown with respect to cohorts in @tbl-pr-summary. A stacked barplot of the proportions of each PR category
+are shown (by cohort) in @fig-pr-barplot. The comparison of the Clinical PR calls vs. the TMA stain evaluation is shown in @tbl-clinical-pr-vs-tma. The Cohen's kappa for clinical vs. TMA evaluation indicates modest agreement (see below).
+
+```{r}
+vcd::Kappa(table(na.omit(data.frame(brtma$pr_category, brtma$`Clinical PR`))))
+```
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+
+
+
+## Summary of PR Evaluation
+```{r}
+#| label: tbl-pr-summary
+#| tbl-cap: Summary of PR stain evaluation by cohort.
+
+
+pr_summary_table <- gtsummary::tbl_summary(
+  brtma, 
+  by="cohort", 
+  include="pr_category",
+  label=list("pr_category"="PR"),
+  missing_text="Not Evaluable",
+  percent="column"
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cohort**"
+  ) |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_p() 
+
+pr_summary_table <- pr_summary_table |>
+  gtsummary::modify_footnote(
+    p.value =  sprintf("Pearson's Chi-squared test: statistic = %5.2f, degrees of freedom = %d",
+    pr_summary_table$table_body$statistic[[1]],
+    pr_summary_table$table_body$parameter[[1]]
+    )
+  )
+
+     
+
+pr_summary_table
+
+
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  pr_summary_table, 
+  file = here::here("delivery/pr_summary_table.xlsx")
+)
+gtsummary::as_flex_table(pr_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/pr_summary_table.docx"))
+```
+
+## Barplot of PR Frequencies
+```{r}
+#| label: fig-pr-barplot
+#| fig-cap: Barplot of frequencies of PR status based on cohort.
+
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  tidyr::drop_na(brtma, pr_category),
+  ggplot2::aes(x=cohort,fill=pr_category)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  # Use RColorBrewer Set1 colors.
+  ggplot2::scale_fill_brewer(palette = "Set1") +
+  ggplot2::xlab("PR Expression per cohort") +
+  ggplot2::labs(caption = "p = 0.003, Chi squared test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+
+p
+
+```
+
+
+```{r}
+png(file = here::here("delivery/pr_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/pr_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+## Clinical PR call vs TMA stain
+
+```{r}
+#| label: tbl-clinical-pr-vs-tma
+#| tbl-cap: Comparison of Clinical PR calls vs. TMA stain evaluations.
+
+pr_vs_clinical_table <- brtma |>
+  dplyr::filter(!is.na(pr_category), !is.na(`Clinical PR`))
+
+pr_clinical_vs_tma <- gtsummary::tbl_summary(
+  pr_vs_clinical_table,
+  include = "pr_category",
+  by = "Clinical PR",
+  label = list("pr_category"="Individual Core PR Result")
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cores with a Documented<br>Clinical PR Result**"
+  ) |>
+  gtsummary::bold_labels() 
+
+
+pr_clinical_vs_tma 
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  pr_clinical_vs_tma , 
+  file = here::here("delivery/pr_clinical_vs_tma.xlsx")
+)
+gtsummary::as_flex_table(pr_clinical_vs_tma ) |>
+  flextable::save_as_docx(path=here::here("delivery/pr_clinical_vs_tma.docx"))
+```
+
+
+# HR (Hormone Recepter: ER and PR)
+
+
+We can combine together the ER/PR status into a "HR" status, namely a hormone receptor status. Note the approach is that if either ER or PR is positive (even in the case that the other call is missing), then the case is HR+. The HR categorization is shown with respect to cohorts in @tbl-hr-summary. A stacked barplot of the proportions of each HR category
+are shown (by cohort) in @fig-hr-barplot. The comparison of the Clinical HR calls vs. the TMA stain evaluation is shown in @tbl-clinical-hr-vs-tma. The Cohen's kappa for clinical vs. TMA evaluation indicates good agreement (see below).
+
+```{r}
+vcd::Kappa(table(na.omit(data.frame(brtma$hr_category, brtma$`Clinical HR`))))
+```
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+
+## Summary of HR Evaluation
+```{r}
+#| label: tbl-hr-summary
+#| tbl-cap: Summary of HR (TMA) evaluation by cohort.
+
+
+hr_summary_table <- gtsummary::tbl_summary(
+  brtma, 
+  by="cohort", 
+  include="hr_category",
+  label=list("hr_category"="HR"),
+  missing_text="Not Evaluable",
+  percent="column"
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cohort**"
+  ) |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_p() 
+
+hr_summary_table <- hr_summary_table |>
+  gtsummary::modify_footnote(
+    p.value =  sprintf("Pearson's Chi-squared test: statistic = %5.2f, degrees of freedom = %d",
+    hr_summary_table$table_body$statistic[[1]],
+    hr_summary_table$table_body$parameter[[1]]
+    )
+  )
+
+     
+
+hr_summary_table
+
+
+```
+
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  hr_summary_table, 
+  file = here::here("delivery/hr_summary_table.xlsx")
+)
+gtsummary::as_flex_table(hr_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/hr_summary_table.docx"))
+```
+
+## Barplot of HR Frequencies
+```{r}
+#| label: fig-hr-barplot
+#| fig-cap: Barplot of frequencies of HR status based on cohort.
+
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  tidyr::drop_na(brtma, hr_category),
+  ggplot2::aes(x=cohort,fill=hr_category)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  # Use RColorBrewer Set1 colors.
+  ggplot2::scale_fill_brewer(palette = "Set1") +
+  ggplot2::xlab("HR Expression per cohort") +
+  ggplot2::labs(caption = "p = 0.006, Chi squared test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+
+p
+
+```
+
+
+```{r}
+png(file = here::here("delivery/hr_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/hr_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+## Clinical HR call vs TMA stain
+
+```{r}
+#| label: tbl-clinical-hr-vs-tma
+#| tbl-cap: Comparison of derived Clinical HR calls vs. derived TMA stain evaluations.
+
+
+hr_vs_clinical_table <- brtma |>
+  dplyr::filter(!is.na(hr_category), !is.na(`Clinical HR`))
+
+hr_clinical_vs_tma <- gtsummary::tbl_summary(
+  hr_vs_clinical_table,
+  include = "hr_category",
+  by = "Clinical HR",
+  label = list("hr_category"="Individual Core HR Result")
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cores with a Documented<br>Clinical HR Result**"
+  ) |>
+  gtsummary::bold_labels() 
+
+
+hr_clinical_vs_tma 
+```
+
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  hr_clinical_vs_tma , 
+  file = here::here("delivery/hr_clinical_vs_tma.xlsx")
+)
+gtsummary::as_flex_table(hr_clinical_vs_tma ) |>
+  flextable::save_as_docx(path=here::here("delivery/hr_clinical_vs_tma.docx"))
+```
+
+
+
+# HER2
+
+The HER2 categorization is shown with respect to cohorts in @tbl-her2-summary. A stacked barplot of the proportions of each HER2 category
+are shown (by cohort) in @fig-her2-barplot. The comparison of the Clinical HER2 calls vs. the TMA stain evaluation is shown in @tbl-clinical-her2-vs-tma. The Cohen's kappa for clinical vs. TMA evaluation indicates much lower agreement (see below).
+
+```{r}
+vcd::Kappa(table(na.omit(data.frame(brtma$her2_category, brtma$`Clinical HER2 IHC`))))
+```
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+
+
+
+## Summary of HER2 Evaluation
+```{r}
+#| label: tbl-her2-summary
+#| tbl-cap: Summary of HER2 stain evaluation by cohort.
+
+
+her2_summary_table <- gtsummary::tbl_summary(
+  brtma, 
+  by="cohort", 
+  include="her2_category",
+  label=list("her2_category"="HER2"),
+  missing_text="Not Evaluable",
+  percent="column"
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cohort**"
+  ) |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_p(pvalue_fun=gtsummary::label_style_pvalue(digits=3)) 
+
+her2_summary_table <- her2_summary_table |>
+  gtsummary::modify_footnote(
+    p.value =  sprintf("Pearson's Chi-squared test: statistic = %5.2f, degrees of freedom = %d",
+    her2_summary_table$table_body$statistic[[1]],
+    her2_summary_table$table_body$parameter[[1]]
+    )
+  )
+
+     
+
+her2_summary_table
+
+
+```
+
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  her2_summary_table, 
+  file = here::here("delivery/her2_summary_table.xlsx")
+)
+gtsummary::as_flex_table(her2_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/her2_summary_table.docx"))
+```
+
+## Barplot of HER2 Frequencies
+```{r}
+#| label: fig-her2-barplot
+#| fig-cap: Barplot of frequencies of HER2 status based on cohort.
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  tidyr::drop_na(brtma, her2_category),
+  ggplot2::aes(x=cohort,fill=her2_category)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  # Use RColorBrewer Set1 colors.
+  ggplot2::scale_fill_brewer(palette = "Set1") +
+  ggplot2::xlab("HER2 Expression per cohort") +
+  ggplot2::labs(caption = "p = 0.387, Chi squared test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+
+
+p
+
+```
+
+
+```{r}
+png(file = here::here("delivery/her2_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/her2_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+## Clinical HER2 IHC call vs TMA stain
+
+```{r}
+#| label: tbl-clinical-her2-vs-tma
+#| tbl-cap: Comparison of Clinical HER2 calls vs. TMA stain evaluations.
+
+
+her2_vs_clinical_table <- brtma |>
+  dplyr::filter(!is.na(her2_category), !is.na(`Clinical HER2 IHC`))
+
+her2_clinical_vs_tma <- gtsummary::tbl_summary(
+  her2_vs_clinical_table,
+  include = "her2_category",
+  by = "Clinical HER2 IHC",
+  label = list("her2_category"="Individual Core HER2 Result")
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cores with a Documented<br>Clinical HER2 IHC Result**"
+  ) |>
+  gtsummary::bold_labels() 
+
+
+her2_clinical_vs_tma 
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  her2_clinical_vs_tma , 
+  file = here::here("delivery/her2_clinical_vs_tma.xlsx")
+)
+gtsummary::as_flex_table(her2_clinical_vs_tma ) |>
+  flextable::save_as_docx(path=here::here("delivery/her2_clinical_vs_tma.docx"))
+```
+
+
+
+
+# Ki67
+We can examine Ki-67 levels, both as percent positive ( @tbl-ki67-basic-percent) and as a risk categorization based on existing literature (@tbl-ki67-basic-risk-table). The manuscript combines these two measures (percent positive and risk) into a single table (@tbl-ki67-risk-table). Risk categories for Ki-67 are shown as stacked barplots in @fig-ki67-barplot. The Ki-67 percent positivity can be seen by cohort in @fig-ki67-boxplot.
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+## Summary of Ki67 Evaluation
+
+### Basic Summary
+```{r}
+#| label: tbl-ki67-basic-percent
+#| tbl-cap: Summary of percent positive Ki-67 across cohorts.
+#| 
+ki67_basic_table <- gtsummary::tbl_summary(
+  brtma, include = "ki67_percent_positive", by = "cohort"
+) |>
+  gtsummary::add_n() |>
+  gtsummary::add_p()
+
+ki67_basic_table <- ki67_basic_table |>
+  gtsummary::modify_footnote(
+    p.value =  sprintf("Kruskal-Wallis rank sum test: chi-squared = %5.2f, degrees of freedom = %d",
+            ki67_basic_table$table_body$statistic[[1]],
+            ki67_basic_table$table_body$parameter[[1]]
+    )
+  )
+ki67_basic_table
+                       
+
+```
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  ki67_basic_table, 
+  file = here::here("delivery/ki67_basic_table.xlsx")
+)
+gtsummary::as_flex_table(ki67_basic_table) |>
+  flextable::save_as_docx(path=here::here("delivery/ki67_basic_table.docx"))
+```
+
+```{r}
+#| label: tbl-ki67-basic-risk-table
+#| tbl-cap: Summary of risk categorizations Ki-67 across cohorts.
+#| 
+ki67_basic_risk_table <- gtsummary::tbl_summary(
+  brtma, 
+  include="ki67_category", by="cohort"
+) |>
+  gtsummary::add_p() |>
+  gtsummary::add_overall() 
+
+ki67_basic_risk_table <- ki67_basic_risk_table |>
+  gtsummary::modify_footnote(
+    p.value =  sprintf("Chi-squared test: chi-squared = %5.2f, degrees of freedom = %d",
+            ki67_basic_risk_table$table_body$statistic[[1]],
+            ki67_basic_risk_table$table_body$parameter[[1]]
+    )
+  ) 
+
+ki67_basic_risk_table |>
+  gtsummary::as_gt() |>
+  gt::tab_style(
+    style = gt::cell_fill(color="lightgrey"), 
+    locations=gt::cells_body(columns="stat_0")
+  )
+
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  ki67_basic_risk_table, 
+  file = here::here("delivery/ki67_basic_risk_table.xlsx")
+)
+gtsummary::as_flex_table(ki67_basic_risk_table) |>
+  flextable::save_as_docx(path=here::here("delivery/ki67_basic_risk_table.docx"))
+```
+### Advanced Summary
+```{r}
+#| label: tbl-ki67-risk-table
+#| tbl-cap: Summary of risk categorizations Ki-67 across cohorts.
+#| 
+
+
+  
+ki67_summary_table <- gtsummary::tbl_summary(
+  brtma, include = c("ki67_percent_positive","ki67_category"), by = "cohort",
+  type = gtsummary::all_continuous() ~ "continuous2",
+  digits = list(gtsummary::all_continuous() ~ 2),
+  label = list(ki67_percent_positive~"Statistics", ki67_category~"Risk Category"),
+  missing_text = "Not Evaluable",
+  statistic =
+      gtsummary::all_continuous() ~ c(
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})"
+      )
+  )  |>
+  gtsummary::modify_header(label="")  |>
+  gtsummary::add_overall() |>
+  gtsummary::bold_labels()  
+
+
+ki67_summary_table |>
+  gtsummary::as_gt() |>
+  gt::tab_style(
+    style = gt::cell_fill(color="lightgrey"), 
+    locations=gt::cells_body(columns="stat_0")
+  )
+```
+
+
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  ki67_summary_table, 
+  file = here::here("delivery/ki67_summary_table.xlsx")
+)
+gtsummary::as_flex_table(ki67_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/ki67_summary_table.docx"))
+```
+
+
+
+## Barplot of Ki67 Risk Frequencies
+```{r}
+#| label: fig-ki67-barplot
+#| fig-cap: Barplot of frequencies of Ki67 status based on cohort.
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  tidyr::drop_na(brtma, ki67_category),
+  ggplot2::aes(x=cohort,fill=ki67_category)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  # Use RColorBrewer Set1 colors.
+  ggplot2::scale_fill_brewer(palette = "Set1") +
+  ggplot2::xlab("Ki67 Risk Category per Cohort") +
+  ggplot2::labs(caption = " p = 0.022, Chi squared test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+
+
+
+
+
+
+p
+
+```
+
+
+```{r}
+png(file = here::here("delivery/ki67_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/ki67_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+
+## Boxplot of Ki67 positivity
+```{r}
+#| label: fig-ki67-boxplot
+#| fig-cap: Boxplot of percent positive nuclei for Ki67 based on cohort.
+
+
+p <- ggpubr::ggboxplot(
+  tidyr::drop_na(brtma, ki67_percent_positive), 
+  x = "cohort", y = "ki67_percent_positive", 
+  fill = "cohort",  bxp.errorbar = TRUE,
+  ylab = "Ki-67 Percent Positive Nuclei",
+  palette = "Set2",
+  xlab = "", na.rm = TRUE
+) +
+  ggplot2::theme(
+    legend.position="none",
+    text=ggplot2::element_text(size=16, face="bold",color="#000000"),
+    axis.text=ggplot2::element_text(color="#000000")
+  ) +
+  ggplot2::labs(caption = "Kruskal-Wallis, p = 0.033") 
+  
+
+p
+
+```
+
+
+```{r}
+png(file = here::here("delivery/ki67_summary_boxplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/ki67_summary_boxplot.pdf"))
+p
+invisible(dev.off())
+```
+
+
+# HR/HER2 status
+Finally, we can combine the Hormone Receptor status (ER or PR), with HER2 status. The HR/HER2 categorization is shown with respect to cohorts in @tbl-hrher2-summary. A stacked barplot of the proportions of each HR/HER2 category
+are shown (by cohort) in @fig-hrher2-barplot. The comparison of the Clinical HR/HER2 calls vs. the TMA stain evaluation is shown in @tbl-clinical-hrher2-vs-tma . The Cohen's kappa for clinical vs. TMA evaluation indicates good agreement (see below).
+
+**FIXME** There are a few samples (51 vs. 53 HF HR+/HER2- and 46 vs. 48 HPR HR+/HER2-) difference between code bases.
+
+```{r}
+vcd::Kappa(table(na.omit(data.frame(brtma$tnbc_category, brtma$`Clinical TNBC`))))
+```
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+
+## Summary of HR/HER2 Status
+```{r}
+#| label: tbl-hrher2-summary
+#| tbl-cap: Summary of HR/HER2 stain evaluation by cohort.
+
+tnbc_summary_table <- gtsummary::tbl_summary(
+  brtma, 
+  by="cohort", 
+  include="tnbc_category",
+  label=list("tnbc_category"="HR/HER2 Cores"),
+  missing_text="Not Evaluable",
+  percent="column"
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cohort**"
+  ) |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_overall() |>
+#|>
+# NB: Needs larger workspace
+  gtsummary::add_p(test=list(tnbc_category ~ "fisher.test"),
+                   test.args = list("tnbc_category" ~ list(workspace=2e7))
+  )
+
+#tnbc_summary_table <- tnbc_summary_table |>
+#  gtsummary::modify_footnote(
+#    p.value =  sprintf("Fisher's exact test: statistic = %5.2f, degrees of freedom = %d",
+#    pr_summary_table$table_body$statistic[[1]],
+ #   pr_summary_table$table_body$parameter[[1]]
+ #   )
+#  )
+
+     
+
+tnbc_summary_table
+
+
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  tnbc_summary_table, 
+  file = here::here("delivery/tnbc_summary_table.xlsx")
+)
+gtsummary::as_flex_table(tnbc_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/tnbc_summary_table.docx"))
+```
+
+## Barplot of HR/HER2 Frequencies
+```{r}
+#| label: fig-hrher2-barplot
+#| fig-cap: Barplot of frequencies of HR/HER2 status based on cohort.
+
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  tidyr::drop_na(brtma, tnbc_category),
+  ggplot2::aes(x=cohort,fill=tnbc_category)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  # Use RColorBrewer Set1 colors.
+  ggplot2::scale_fill_brewer(palette = "Set1") +
+  ggplot2::xlab("HR/HER2 Expression per Cohort") +
+  ggplot2::labs(caption = "p = 0.004, Fisher's exact test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+p
+
+
+```
+
+
+```{r}
+png(file = here::here("delivery/tnbc_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/tnbc_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+## Clinical HR/HER2 call vs TMA stain
+
+```{r}
+#| label: tbl-clinical-hrher2-vs-tma
+#| tbl-cap: Comparison of derived Clinical HR/HER2 calls vs. TMA stain evaluations.
+
+tnbc_vs_clinical_table <- brtma |>
+  dplyr::filter(!is.na(tnbc_category), !is.na(`Clinical TNBC`))
+
+tnbc_clinical_vs_tma <- gtsummary::tbl_summary(
+  tnbc_vs_clinical_table,
+  include = "tnbc_category",
+  by = "Clinical TNBC",
+  label = list("tnbc_category"="Individual Core HR/HER2 Result")
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cores with a Documented<br>Clinical HR/HER2 Result**"
+  ) |>
+  gtsummary::bold_labels() 
+
+
+tnbc_clinical_vs_tma 
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  pr_clinical_vs_tma , 
+  file = here::here("delivery/pr_clinical_vs_tma.xlsx")
+)
+gtsummary::as_flex_table(pr_clinical_vs_tma ) |>
+  flextable::save_as_docx(path=here::here("delivery/pr_clinical_vs_tma.docx"))
+```
+
+# PAM50
+
+
+The ER categorization is shown with respect to cohorts in @tbl-er-summary. A stacked barplot of the proportions of each ER category
+are shown (by cohort) in @fig-er-barplot. The comparison of the Clinical ER calls vs. the TMA stain evaluation is shown in @tbl-clinical-er-vs-tma. 
+
+
+
+**NOTE** The figures and tables in this document are exported in
+various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
+
+
+
+## Summary of PAM50
+```{r}
+#| label: tbl-pam50-summary
+#| tbl-cap: Summary of PAM50 by cohort.
+#| 
+
+# Clean up the pam50 (remove missing) and make unique
+# since multiple cores match to the same PAM50 call 
+# (PAM50 is from RNAseq of bulk tumor, one measurement
+# per patient).
+pam50 <- brtma |>
+  dplyr::filter(!is.na(pam50_subtype)) |>
+  dplyr::select(cohort, pam50_subtype, study_patient_id) |>
+  dplyr::distinct() |>
+  dplyr::mutate(cohort=forcats::fct_drop(cohort))
+  
+pam50_summary_table <- gtsummary::tbl_summary(
+  pam50, 
+  by="cohort", 
+  include="pam50_subtype",
+  label=list("pam50_subtype"="PAM50"),
+  missing_text="Not Evaluable",
+  percent="column"
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cohort**"
+  ) |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_p() |>
+  gtsummary::add_overall() 
+
+pam50_summary_table |>
+  gtsummary::as_gt() |>
+  gt::tab_style(
+    style = gt::cell_fill(color="lightgrey"), 
+    locations=gt::cells_body(columns="stat_0")
+  )
+
+```
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  pam50_summary_table, 
+  file = here::here("delivery/pam50_summary_table.xlsx")
+)
+gtsummary::as_flex_table(pam50_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/pam50_summary_table.docx"))
+```
+
+## Barplot of PAM50 Frequencies
+```{r}
+#| label: fig-pam50-barplot
+#| fig-cap: Barplot of frequencies of PAM50 based on cohort.
+
+# I believe I got these (or tried to match these) from a publication.
+pam50_colors <- c(
+  "Luminal A"="#1f78b4",
+  "Luminal B"="#a6cee3",
+  "HER2-enriched"="#fb9a99", 
+  "Normal-like"="#4daf4a", 
+  "Basal-like"="#e41a1c"
+)
+
+
+p <- ggplot2::ggplot(
+  # Drop NA values first, to avoid problems later.
+  pam50,
+  ggplot2::aes(x=cohort,fill=pam50_subtype)
+) +
+  # This is the actual code for stacked barplot. Note the reverse, which
+  # gives us the appropriate ordering of categories.
+  ggplot2::geom_bar(
+    stat="count", 
+    position=ggplot2::position_fill(reverse=TRUE), # Stack the percents (fill)
+    color="black" # Outline the categories
+  ) +
+  # Convert to percentage y axis
+  ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
+  ggplot2::scale_fill_manual(values = pam50_colors) +
+  ggplot2::xlab("PAM50 per Cohort") +
+  ggplot2::labs(caption = "p = 0.066, Fisher's exact test") +
+  # ggpubr gives a clean theme
+  ggpubr::theme_pubr() +
+  # Add space to x axis (left bar) and limit y axis to 0-1 range 
+  # (no additional space).
+  ggplot2::coord_cartesian(xlim=c(0.5, NA), ylim=c(0,1), expand=FALSE) +
+  # Finally, turn off parts of the graph (not needed).
+  ggplot2::theme(
+    legend.title=ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.title.y = ggplot2::element_blank()
+  )
+
+p
+```
+
+```{r}
+png(file = here::here("delivery/pam50_summary_barplot.png"))
+p
+invisible(dev.off())
+pdf(file=here::here("delivery/pam50_summary_barplot.pdf"))
+p
+invisible(dev.off())
+```
+
+
+

@@ -1,0 +1,29 @@
+project:
+  output-dir: public
+  type: website
+
+# This allows reports that don't change to not be rendered every time
+execute:
+  freeze: auto
+
+website:
+  #title: "Custom title if package doesn't work"
+  navbar:
+    background: primary
+    search: true
+    left:
+      - text: "Home"
+        file: index.qmd
+  sidebar:
+    style: "docked"
+    contents: auto
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: true
+    # Use these as default figure width/height if they end up too small.
+    # fig-width: 7
+    # fig-height: 7
+
