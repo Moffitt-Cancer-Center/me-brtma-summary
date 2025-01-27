@@ -1,6 +1,6 @@
 Package: me-brtma-summary
 Title: Analysis Code for MEBRCA Tissue Microarray Manuscript
-Version: 0.0.0.9000
+Version: 1.0.0
 Authors@R: 
     person("Lantz", "Abby", , "abigail.lantz@moffitt.org", role = c("aut", "cre"))
     person("Eschrich","Steven",,"steven.eschrich@moffitt.org", role=c("aut","cre"))
