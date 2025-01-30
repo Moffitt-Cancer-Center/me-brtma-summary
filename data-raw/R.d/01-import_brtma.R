@@ -5,10 +5,8 @@
 # The result will be a table object that can be stored in the
 # PROJECT_HOME/data directory.
 
-brca_tissue <- readxl::read_xlsx(here::here("data-raw/imports/ME-BRTMA-pdata_0.2.0.xlsx")) |>
-  # We keep only the tumor cores from Breast cancers (there are controls, stroma
-  # and normal on the TMA).
-  dplyr::filter(diagnosis=="tumor" & !is_control & tissue == "Breast") |>
+all_tma <- readxl::read_xlsx(here::here("data-raw/imports/ME-BRTMA-pdata_0.2.0.xlsx")) |>
+
   # Relabel the cohorts to align with manuscript
   dplyr::mutate(
     cohort = dplyr::case_when(
@@ -19,6 +17,8 @@ brca_tissue <- readxl::read_xlsx(here::here("data-raw/imports/ME-BRTMA-pdata_0.2
     # We want to present these in a fixed order
     cohort = factor(cohort, levels=c("NHW","NHB","HF","HPR"))
   )
+
+
 
 #
 # We read each stain in independently and transform variables as needed.
@@ -105,16 +105,25 @@ pam50 <- readr::read_tsv(
       "LumA" ~ "Luminal A",
       "LumB" ~ "Luminal B"
     )
+  ) |>
+  # Join back to the tma to get the cohort for the PAM50
+  dplyr::left_join(
+    dplyr::select(all_tma, study_patient_id, cohort) |> dplyr::distinct(),
+    by = "study_patient_id"
   )
 
 
 
 # Combine stains together into a single table.
-brtma <- dplyr::left_join(
-  brca_tissue,
-  dplyr::select(er, study_core_id, er_percent_positive, er_category),
-  by = "study_core_id"
-) |>
+brtma <- all_tma |>
+  # We keep only the tumor cores from Breast cancers (there are controls, stroma
+  # and normal on the TMA).
+  dplyr::filter(diagnosis=="tumor" & !is_control & tissue == "Breast") |>
+
+  dplyr::left_join(
+    dplyr::select(er, study_core_id, er_percent_positive, er_category),
+    by = "study_core_id"
+  ) |>
   dplyr::left_join(
     dplyr::select(pr, study_core_id, pr_percent_positive, pr_category),
     by = "study_core_id"
@@ -126,10 +135,6 @@ brtma <- dplyr::left_join(
   dplyr::left_join(
     dplyr::select(ki67, study_core_id, ki67_percent_positive, ki67_category),
     by = "study_core_id"
-  ) |>
-  dplyr::left_join(
-    pam50,
-    by = "study_patient_id"
   )
 
 
@@ -195,3 +200,4 @@ brtma <- brtma |>
 # table(hr$`Clinical ER`, hr$`Clinical PR`, useNA="always")
 
 saveRDS(brtma, here::here("data-raw/work/01-brtma.rds"))
+saveRDS(pam50, here::here("data-raw/work/01-pam50.rds"))

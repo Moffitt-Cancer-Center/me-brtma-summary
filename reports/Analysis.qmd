@@ -1040,11 +1040,12 @@ various formats in the `delivery` directory. For tables, excel and word versions
 #| tbl-cap: Summary of PAM50 by cohort.
 #| 
 
+pam50 <- readRDS(here::here("data/pam50.rds"))
 # Clean up the pam50 (remove missing) and make unique
 # since multiple cores match to the same PAM50 call 
 # (PAM50 is from RNAseq of bulk tumor, one measurement
 # per patient).
-pam50 <- brtma |>
+pam50 <- pam50 |>
   dplyr::filter(!is.na(pam50_subtype)) |>
   dplyr::select(cohort, pam50_subtype, study_patient_id) |>
   dplyr::distinct() |>
@@ -1116,7 +1117,7 @@ p <- ggplot2::ggplot(
   ggplot2::scale_y_continuous(name="",labels=scales::label_percent()) +
   ggplot2::scale_fill_manual(values = pam50_colors) +
   ggplot2::xlab("PAM50 per Cohort") +
-  ggplot2::labs(caption = "p = 0.066, Fisher's exact test") +
+  ggplot2::labs(caption = "p = 0.031, Fisher's exact test") +
   # ggpubr gives a clean theme
   ggpubr::theme_pubr() +
   # Add space to x axis (left bar) and limit y axis to 0-1 range 

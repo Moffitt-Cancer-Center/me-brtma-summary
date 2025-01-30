@@ -11,7 +11,7 @@ OS = $(shell uname)
 
 # Fix for running under MacOS with decryption at border.
 ifeq ($(OS), Darwin)
-		DENO_TLS_CA_STORE=system
+		export DENO_TLS_CA_STORE=system
 endif
 
 
