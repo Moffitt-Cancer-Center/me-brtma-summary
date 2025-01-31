@@ -184,9 +184,9 @@ brtma <- brtma |>
     `Clinical TNBC` = dplyr::case_when(
       # NB: Borderline Clinical HER2/IHC are excluded from TNBC calls and treated as missing
       `Clinical HR` == "Negative" & `Clinical HER2 IHC` %in% c("Negative") ~ "HR-/HER2-",
-      `Clinical HR` == "Negative" & `Clinical HER2 IHC` %in% c("Positive") ~ "HR-/HER2+",
+      `Clinical HR` == "Negative" & `Clinical HER2 IHC` %in% c("Borderline","Positive") ~ "HR-/HER2+",
       `Clinical HR` == "Positive" & `Clinical HER2 IHC` %in% c("Negative") ~ "HR+/HER2-",
-      `Clinical HR` == "Positive" & `Clinical HER2 IHC` %in% c("Positive") ~ "HR+/HER2+",
+      `Clinical HR` == "Positive" & `Clinical HER2 IHC` %in% c("Borderline","Positive") ~ "HR+/HER2+",
       .default = NA
     ),
     `Clinical TNBC` = factor(`Clinical TNBC`, levels=c("HR-/HER2-","HR-/HER2+","HR+/HER2-","HR+/HER2+"))
