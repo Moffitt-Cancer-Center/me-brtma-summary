@@ -155,13 +155,9 @@ brtma <- brtma |>
     hr_category = dplyr::case_when(
       # Negative is only when both receptors are known and negative.
       er_category == "Negative (0 PPN)" & pr_category=="Negative (0 PPN)" ~ "Negative",
-      # Missing ER, cannot determine negative
-      is.na(er_category) & pr_category == "Negative (0 PPN)" ~ NA,
-      # Missing PR, cannot determine negative
-      er_category == "Negative (0 PPN)" & is.na(pr_category) ~ NA,
-      # If both are missing, then definitely missing HR
-      is.na(er_category) & is.na(pr_category) ~ NA,
-      #
+      # The approach used is to treat HR as NA if either observation is NA
+      is.na(er_category) | is.na(pr_category) ~ NA,
+      # Everything else is positive (either are positive with both observations)
       .default = "Positive"
     ),
     `Clinical HR` = dplyr::case_when(
@@ -186,10 +182,11 @@ brtma <- brtma |>
       levels = c("HR-/HER2-","HR-/HER2+","HR+/HER2-","HR+/HER2+")
     ),
     `Clinical TNBC` = dplyr::case_when(
+      # NB: Borderline Clinical HER2/IHC are excluded from TNBC calls and treated as missing
       `Clinical HR` == "Negative" & `Clinical HER2 IHC` %in% c("Negative") ~ "HR-/HER2-",
-      `Clinical HR` == "Negative" & `Clinical HER2 IHC` %in% c("Borderline","Positive") ~ "HR-/HER2+",
+      `Clinical HR` == "Negative" & `Clinical HER2 IHC` %in% c("Positive") ~ "HR-/HER2+",
       `Clinical HR` == "Positive" & `Clinical HER2 IHC` %in% c("Negative") ~ "HR+/HER2-",
-      `Clinical HR` == "Positive" & `Clinical HER2 IHC` %in% c("Borderline","Positive") ~ "HR+/HER2+",
+      `Clinical HR` == "Positive" & `Clinical HER2 IHC` %in% c("Positive") ~ "HR+/HER2+",
       .default = NA
     ),
     `Clinical TNBC` = factor(`Clinical TNBC`, levels=c("HR-/HER2-","HR-/HER2+","HR+/HER2-","HR+/HER2+"))
@@ -201,3 +198,4 @@ brtma <- brtma |>
 
 saveRDS(brtma, here::here("data-raw/work/01-brtma.rds"))
 saveRDS(pam50, here::here("data-raw/work/01-pam50.rds"))
+saveRDS(all_tma, here::here("data-raw/work/01-full_tma.rds"))

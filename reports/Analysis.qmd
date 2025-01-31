@@ -19,10 +19,56 @@ table `data/brtma.rds` that will be used for figures/graphs in this document.
 #| label: setup
 
 brtma <- readRDS(here::here("data/brtma.rds"))
+full_tma <- readRDS(here::here("data/full_tma.rds"))
+```
+
+
+## Overall TMA Characteristics
+There is limited clinical information used in this paper for the cohort, however we can assemble the number of patients per cohort and number of cores of various types.
+
+```{r}
+#| label: tbl-tma-summary
+#| tbl-cap: Overall summary of the full TMA (all cores).
+
+pts_per_cohort <- full_tma |>
+  # Filtering by control subsets to only breast tissue-related patients
+  dplyr::filter(!is_control) |>
+  dplyr::select(cohort, study_patient_id) |>
+  dplyr::distinct() |>
+  dplyr::count(by=cohort) |>
+  dplyr::rename(Cohort = by) |>
+  gt::gt()
+pts_per_cohort
+```
+
+```{r}
+#| label: tbl-basic-tma-stats
+#| tbl-cap: Overall statistics of the constructed TMA.
+
+
+# Breakdown of cores (by TMA) and total number of cores
+gtsummary::tbl_summary(full_tma, include=c("tma_number")) |>
+  gtsummary::modify_header("label" ~ "**Number of Cores**")
+```
+
+```{r}
+#| label: tbl-tma-tissue-vs-diagnosis
+#| tbl-cap: Counts of tissue types and diagnosis of tissue.
+                       
+gtsummary::tbl_summary(full_tma, include=c("tissue"),by="diagnosis")
 
 ```
 
-There is limited clinical information used in this paper for the cohort, so instead of a typical Table 1, we provide an overview of all of the scores used in the paper separated out by cohort (@tbl-overall-summary).
+```{r}
+#| label: tbl-diagnosis-by-cohort
+#| tbl-cap: Count of tissues by diagnosis type, by cohort.
+gtsummary::tbl_summary(full_tma, by="diagnosis", include="cohort") |>
+  gtsummary::add_overall()
+```
+
+
+## Breast Cancer-specific TMA Characteristics
+We provide an overview of all of the scores used in the paper separated out by cohort (@tbl-overall-summary).
 
 ```{r}
 #| label: tbl-overall-summary
@@ -844,7 +890,7 @@ p <- ggpubr::ggboxplot(
   x = "cohort", y = "ki67_percent_positive", 
   fill = "cohort",  bxp.errorbar = TRUE,
   ylab = "Ki-67 Percent Positive Nuclei",
-  palette = "Set2",
+  palette = "Set1",
   xlab = "", na.rm = TRUE
 ) +
   ggplot2::theme(

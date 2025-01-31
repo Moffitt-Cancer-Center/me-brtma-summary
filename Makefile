@@ -32,4 +32,5 @@ data-raw:
 	Rscript -e 'projcycle::build_data()'
 
 clean:
-	rm -rf public
+	rm -rf public _freeze
+
