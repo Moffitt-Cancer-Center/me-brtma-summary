@@ -38,7 +38,13 @@ er <- readxl::read_xlsx(here::here("data-raw/imports/ME_BRTMA_path_stain_scores_
       is.na(er_percent_positive) ~ NA_character_,
       .default = "Negative (0 PPN)"
     ),
-    er_category = factor(er_category, levels=c("Negative (0 PPN)", "Low Positive (1-10 PPN)", "Positive (>10 PPN)"))
+    er_category = factor(er_category, levels=c("Negative (0 PPN)", "Low Positive (1-10 PPN)", "Positive (>10 PPN)")),
+    er_simple_category = dplyr::case_when(
+      er_category %in% c("Positive (>10 PPN)", "Low Positive (1-10 PPN)") ~ "Positive (>0 PPN)",
+      is.na(er_category) ~ NA_character_,
+      .default = "Negative (0 PPN)"
+    ),
+    er_simple_category = factor(er_simple_category, levels=c("Negative (0 PPN)", "Positive (>0 PPN)"))
   )
 
 
@@ -121,7 +127,7 @@ brtma <- all_tma |>
   dplyr::filter(diagnosis=="tumor" & !is_control & tissue == "Breast") |>
 
   dplyr::left_join(
-    dplyr::select(er, study_core_id, er_percent_positive, er_category),
+    dplyr::select(er, study_core_id, er_percent_positive, er_category, er_simple_category),
     by = "study_core_id"
   ) |>
   dplyr::left_join(

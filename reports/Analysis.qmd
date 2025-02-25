@@ -286,6 +286,62 @@ gtsummary::as_flex_table(er_clinical_vs_tma ) |>
 ```
 
 
+## Simplified ER
+The classification of ER stains as negative, low positive, and positive is a new
+development for diagnostic purposes. Our existing clinical classifications do not
+include this level of resolution, therefore we can compare the simplified ER
+stain results to the clinical ER status. Note we also remove the equivocal from
+the clinical results.
+
+```{r}
+cliner <- dplyr::filter(brtma, !`Clinical ER`=="Equivocal") |>
+  dplyr::mutate(`Clinical ER` = forcats::fct_drop(`Clinical ER`))
+vcd::Kappa(table(na.omit(data.frame(cliner$er_simple_category , cliner$`Clinical ER`))))
+```
+
+
+### Clinical ER call vs Simplified TMA stain
+```{r}
+#| label: tbl-clinical-er-vs-tma-simplified
+#| tbl-cap: Comparison of Clinical ER calls vs. TMA stain evaluations (simplified).
+
+er_vs_clinical_table <- brtma |>
+  dplyr::filter(
+    !is.na(er_simple_category),
+    !is.na(`Clinical ER`), 
+    !`Clinical ER`=="Equivocal"
+  ) |>
+  dplyr::mutate(`Clinical ER`=forcats::fct_drop(`Clinical ER`))
+
+er_clinical_vs_tma <- gtsummary::tbl_summary(
+  er_vs_clinical_table,
+  include = "er_simple_category",
+  by = "Clinical ER",
+  label = list("er__simple_category"="Individual Core ER Result")
+) |>
+  gtsummary::modify_header(label="") |>
+  gtsummary::modify_spanning_header(
+    gtsummary::all_stat_cols() ~ "**Cores with a Documented<br>Clinical ER Result**"
+  ) |>
+  gtsummary::bold_labels() 
+
+
+
+er_clinical_vs_tma 
+```
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  er_clinical_vs_tma , 
+  file = here::here("delivery/er_clinical_vs_tma_simplified.xlsx")
+)
+gtsummary::as_flex_table(er_clinical_vs_tma ) |>
+  flextable::save_as_docx(path=here::here("delivery/er_clinical_vs_tma_simplified.docx"))
+```
+
+
+
+
 # PR
 
 The PR categorization is shown with respect to cohorts in @tbl-pr-summary. A stacked barplot of the proportions of each PR category
