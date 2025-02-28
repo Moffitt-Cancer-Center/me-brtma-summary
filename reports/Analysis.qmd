@@ -1,10 +1,12 @@
 ---
-title: "Analysis"
+title: "ME-BRTMA Analysis"
 format: 
   html:
     embed-resources: true
     code-fold: true
     toc: true
+    grid:
+      body-width: 1000px
 ---
 
 
@@ -18,51 +20,62 @@ table `data/brtma.rds` that will be used for figures/graphs in this document.
 ```{r}
 #| label: setup
 
+pkgload::load_all(quiet=TRUE)
+
+# brtma is all breast tumor cores
 brtma <- readRDS(here::here("data/brtma.rds"))
+
+# full_tma includes all non-tumor/non-breast cores, etc.
 full_tma <- readRDS(here::here("data/full_tma.rds"))
 
-pairwise.fisher.test <- function(g1, g2, p.adjust.method=p.adjust.methods) {
-  g1 <- factor(g1)
-  g2 <- factor(g2)
-  DNAME <- ""
-  p.adjust.method <- match.arg(p.adjust.method)
-  compare.levels <- function(i,j) {
-    fisher.test(table(g1,g2)[,c(i,j)])$p.value
-  }
-  PVAL <- pairwise.table(compare.levels, levels(g2), p.adjust.method)
-  ans <- list(method="fisher.test", data.name=DNAME,
-              p.value=PVAL, p.adjust.method=p.adjust.method)
-  class(ans) <- "pairwise.htest"
-  ans
-}
+# pdata is the clinical data available
+clinical_data<-readRDS(here::here("data/clinical_data.rds"))
 
-add_stat_pairwise <- function(data, variable, by, ...) {
-  # calculate pairwise p-values
-  pw <- pairwise.fisher.test(data[[variable]], data[[by]], p.adj = "none")
 
-  # convert p-values to list
-  index <- 0L
-  p.value.list <- list()
-  for (i in seq_len(nrow(pw$p.value))) {
-    for (j in seq_len(nrow(pw$p.value))) {
-      index <- index + 1L
-      
-      p.value.list[[index]] <- 
-        c(pw$p.value[i, j]) |>
-        setNames(glue::glue("**{colnames(pw$p.value)[j]} vs. {rownames(pw$p.value)[i]}**"))
-    }
-  }
-  
-  # convert list to data frame
-  p.value.list |>
-    unlist() |>
-    purrr::discard(is.na) |>
-    t() |>
-    as.data.frame() |>
-    # formatting/roundign p-values
-    dplyr::mutate(dplyr::across(everything(), gtsummary::style_pvalue))
-}
 
+
+# Since patients have multiple breast cancer cores, we can
+# summarize the overall results by patient. Included are the
+# min/max evaluation for er/pr/her2.
+brtma_core_by_patient <- brtma |>
+  dplyr::group_by(study_patient_id) |>
+  dplyr::summarize(
+    cohort = unique(cohort),
+    
+    er_number_of_cores = length(na.omit(er_category)),
+    er_category_min = fct_min(er_category),
+    er_category_max = fct_max(er_category),
+    
+    pr_number_of_cores = length(na.omit(pr_category)),
+    pr_category_min = fct_min(pr_category),
+    pr_category_max = fct_max(pr_category),
+
+    her2_number_of_cores = length(na.omit(her2_category)),
+    her2_category_min = fct_min(her2_category),
+    her2_category_max = fct_max(her2_category),
+    
+    ki67_number_of_cores = length(na.omit(ki67_percent_positive)),
+    ki67_min = ifelse(
+      ki67_number_of_cores > 0,
+      min(ki67_percent_positive,na.rm=TRUE),
+      NA
+    ),
+    ki67_max = ifelse(
+      ki67_number_of_cores > 0,
+      max(ki67_percent_positive, na.rm=TRUE),
+      NA
+    ),
+    ki67_diffs = ki67_max-ki67_min
+  ) |>
+  # Convert min/max levels into factors with the corresponding levels (for sorting)
+  dplyr::mutate(
+    er_category_min = factor(er_category_min, levels = levels(brtma$er_category)),
+    er_category_max = factor(er_category_max, levels(brtma$er_category)),
+    pr_category_min = factor(pr_category_min, levels = levels(brtma$pr_category)),
+    pr_category_max = factor(pr_category_max, levels = levels(brtma$pr_category)),
+    her2_category_min = factor(her2_category_min, levels = levels(brtma$her2_category)),
+    her2_category_max = factor(her2_category_max, levels = levels(brtma$her2_category))
+  )
 ```
 
 
@@ -148,6 +161,102 @@ gtsummary::tbl_summary(
     "Clinical TNBC" ~ list(simulate.p.value=TRUE, B = 10000)
   ))
 
+```
+
+## Clinical Data
+
+We have some basic clinical data elements available currently for this cohort, which is summarized below in terms of outcomes, followup and key clinical/demographic information. Note that the followup uses the reverse-km approach for estimating median followup time. Both the 36month and 60 month overall survival estimates are provided.
+
+
+```{r}
+#| label: tbl-summary-tableone
+#| tbl-cap: Summary of basic information about BRTMA cohort.
+
+gtsummary::tbl_summary(
+  clinical_data, 
+  by="cohort",
+  include=c(
+    "age_at_diagnosis",
+    "pathology_t_stage",
+    "grade_differentiation",
+    "clinical_tumor_size"
+  ),
+  label = list(
+    age_at_diagnosis = "Age at Diagnosis",
+    pathology_t_stage = "T Stage (pathology)",
+    grade_differentiation = "Grade",
+    clinical_tumor_size = "Tumor Size (cm)"
+  ),
+  missing_text = "Unknown/Missing"
+) |> 
+  gtsummary::add_p()
+
+
+
+```
+
+
+```{r}
+#| label: tbl-outcomes
+#| tbl-cap: Outcomes for ME-BRTMA by cohort. Note that the overall test for differences in overall survival is not significant (p = 0.1, Chiseq = 5.3, 3 degrees of freedom).
+
+overall_differences <- survival::survdiff(os~cohort, data=clinical_data)
+
+# Would like to report (by cohort)
+#   36/60mo survival
+#   median followup time (rev km method)
+#   
+summary_outcomes <-clinical_data |>
+  dplyr::group_by(cohort) |>
+  dplyr::summarize(
+    OS_36mo = list(summary(survival::survfit(os~1),times=36)),
+    OS_36mo_survival = 100 * OS_36mo[[1]]$surv,
+    OS_36mo_lower_ci = 100 * OS_36mo[[1]]$lower,
+    OS_36mo_upper_ci = 100 * OS_36mo[[1]]$upper,
+     
+    OS_60mo = list(summary(survival::survfit(os~1), times = 60)),
+    OS_60mo_survival = 100 * OS_60mo[[1]]$surv,
+    OS_60mo_lower_ci = 100 * OS_60mo[[1]]$lower,
+    OS_60mo_upper_ci = 100 * OS_60mo[[1]]$upper,
+    
+    followup_summary = list(surv_median(survival::survfit(followup~1))),
+    followup_median = followup_summary[[1]][["median"]],
+    followup_median_lower_ci = followup_summary[[1]][["0.95LCL"]],
+    followup_median_upper_ci = followup_summary[[1]][["0.95UCL"]]
+  ) |>
+  dplyr::mutate(
+    Cohort = cohort,
+    `36mo OS` = sprintf(
+      "%3.1f%% (%2.0f-%2.0f)",
+      OS_36mo_survival, 
+      OS_36mo_lower_ci,
+      OS_36mo_upper_ci
+    ),
+    `60mo OS` = sprintf(
+      "%3.1f%% (%2.0f-%2.0f)",
+      OS_60mo_survival, 
+      OS_60mo_lower_ci,
+      OS_60mo_upper_ci
+    ),
+    `Median Followup (months)` = sprintf(
+      "%3.0f (%2.0f-%2.0f)",
+      followup_median, 
+      followup_median_lower_ci,
+      followup_median_upper_ci
+    )      
+  )
+
+
+# Pretty print summary_outcomes
+
+gt::gt(
+  dplyr::select(
+    summary_outcomes, 
+    Cohort, 
+    `36mo OS`, 
+    `60mo OS`,
+    `Median Followup (months)`)
+)
 ```
 
 
@@ -296,6 +405,8 @@ the clinical results.
 ```{r}
 cliner <- dplyr::filter(brtma, !`Clinical ER`=="Equivocal") |>
   dplyr::mutate(`Clinical ER` = forcats::fct_drop(`Clinical ER`))
+
+
 vcd::Kappa(table(na.omit(data.frame(cliner$er_simple_category , cliner$`Clinical ER`))))
 ```
 
@@ -339,7 +450,39 @@ gtsummary::as_flex_table(er_clinical_vs_tma ) |>
   flextable::save_as_docx(path=here::here("delivery/er_clinical_vs_tma_simplified.docx"))
 ```
 
+## Variation of ER across TMA cores
+Patient cores can vary in terms of overall content (for tumor cores). Therefore we compare the ER scores by considering the "lowest" scoring tumor core vs. the "highest" scoring tumor core across the TMA. In the case of only one tumor core, the result for high/low are the same. Note there are 159 total patients on the TMA.
 
+```{r}
+#| label: tbl-er-cross
+#| tbl-cap: Agreement of tumor cores for same patient in TMA. The lowest ER score (rows) and highest ER score (columns) are compared across patients. One expects a large number of counts along the diagonal. 
+#| 
+gtsummary::tbl_cross(
+  brtma_core_by_patient,
+  row = "er_category_min",
+  col = "er_category_max",
+  label = list(
+    er_category_min="Lowest ER Score",
+    er_category_max="Highest ER Score"
+  )
+)
+
+
+```
+
+We can also examine the number of cores/patient. Note that each stain may have failures, resulting in 0 cores for a specific stain for a specific patient or in the case of two patients, no viable cores.
+```{r}
+#| label: tbl-er-num-cores
+#| tbl-cap: Summary of number of ER-stained cores per patient (by cohort). Note that some may have no cores, as these patients only have PR/HER2 stains successfully called. In the case of two patients (37, 167) there were no viable cores.
+
+gtsummary::tbl_summary(
+  brtma_core_by_patient, 
+  include="er_number_of_cores",
+  by="cohort",
+  label = list(er_number_of_cores="ER Cores/Patient")
+) |>
+  gtsummary::add_overall()
+```
 
 
 # PR
@@ -488,6 +631,42 @@ gtsummary::as_hux_xlsx(
 gtsummary::as_flex_table(pr_clinical_vs_tma ) |>
   flextable::save_as_docx(path=here::here("delivery/pr_clinical_vs_tma.docx"))
 ```
+
+
+## Variation of PR across TMA cores
+Patient cores can vary in terms of overall content (for tumor cores). Therefore we compare the PR scores by considering the "lowest" scoring tumor core vs. the "highest" scoring tumor core across the TMA. In the case of only one tumor core, the result for high/low are the same. Note there are 159 total patients on the TMA.
+
+```{r}
+#| label: tbl-pr-cross
+#| tbl-cap: Agreement of tumor cores for same patient in TMA. The lowest PR score (rows) and highest PR score (columns) are compared across patients. One expects a large number of counts along the diagonal. 
+#| 
+gtsummary::tbl_cross(
+  brtma_core_by_patient,
+  row = "pr_category_min",
+  col = "pr_category_max",
+  label = list(
+    pr_category_min="Lowest PR Score",
+    pr_category_max="Highest PR Score"
+  )
+)
+
+
+```
+
+We can also examine the number of cores/patient. Note that each stain may have failures, resulting in 0 cores for a specific stain for a specific patient or in the case of two patients, no viable cores.
+```{r}
+#| label: tbl-pr-num-cores
+#| tbl-cap: Summary of number of PR-stained cores per patient (by cohort). Note that some may have no cores, as these patients only have ER/HER2 stains successfully called. In the case of two patients (37, 167) there were no viable cores.
+
+gtsummary::tbl_summary(
+  brtma_core_by_patient, 
+  include="pr_number_of_cores",
+  by="cohort",
+  label = list(pr_number_of_cores="PR Cores/Patient")
+) |>
+  gtsummary::add_overall()
+```
+
 
 
 # HR (Hormone Recepter: ER and PR)
@@ -793,6 +972,40 @@ gtsummary::as_flex_table(her2_clinical_vs_tma ) |>
   flextable::save_as_docx(path=here::here("delivery/her2_clinical_vs_tma.docx"))
 ```
 
+## Variation of HER2 across TMA cores
+Patient cores can vary in terms of overall content (for tumor cores). Therefore we compare the HER2 scores by considering the "lowest" scoring tumor core vs. the "highest" scoring tumor core across the TMA. In the case of only one tumor core, the result for high/low are the same. Note there are 159 total patients on the TMA.
+
+```{r}
+#| label: tbl-her2-cross
+#| tbl-cap: Agreement of tumor cores for same patient in TMA. The lowest HER2 score (rows) and highest HER2 score (columns) are compared across patients. One expects a large number of counts along the diagonal. 
+#| 
+gtsummary::tbl_cross(
+  brtma_core_by_patient,
+  row = "her2_category_min",
+  col = "her2_category_max",
+  label = list(
+    her2_category_min="Lowest HER2 Score",
+    her2_category_max="Highest HER2 Score"
+  )
+)
+
+
+```
+
+We can also examine the number of cores/patient. Note that each stain may have failures, resulting in 0 cores for a specific stain for a specific patient or in the case of two patients, no viable cores.
+```{r}
+#| label: tbl-her2-num-cores
+#| tbl-cap: Summary of number of HER2-stained cores per patient (by cohort). Note that some may have no cores, as these patients only have ER/PR stains successfully called. In the case of two patients (37, 167) there were no viable cores.
+
+gtsummary::tbl_summary(
+  brtma_core_by_patient, 
+  include="her2_number_of_cores",
+  by="cohort",
+  label = list(her2_number_of_cores="HER2 Cores/Patient")
+) |>
+  gtsummary::add_overall()
+```
+
 
 
 
@@ -801,6 +1014,7 @@ We can examine Ki-67 levels, both as percent positive ( @tbl-ki67-basic-percent)
 
 **NOTE** The figures and tables in this document are exported in
 various formats in the `delivery` directory. For tables, excel and word versions are created; for figures, pdf and png files.
+
 
 
 ## Summary of Ki67 Evaluation
@@ -1013,6 +1227,92 @@ pdf(file=here::here("delivery/ki67_summary_boxplot.pdf"))
 p
 invisible(dev.off())
 ```
+
+## Ki67 vs. Clinical Subtypes
+We can also look at ki67 percent positivity by clinical subtype (HR/HER2) by cohort.
+
+```{r}
+#| label: fig-ki67-subtype-cohort
+#| fig-cap: Boxplot of ki67 percent positivity by clinical subtype and by cohort.
+
+ggpubr::ggboxplot(
+   tidyr::drop_na(brtma, ki67_percent_positive, tnbc_category), 
+   x = "tnbc_category",
+   y = "ki67_percent_positive",
+   fill = "cohort",
+   bxp.errorbar = TRUE,
+   ylab = "Ki-67 Percent Positive Nuclei",
+   palette = "Set1",
+   xlab = "", na.rm = TRUE
+)    +
+  ggplot2::theme(
+    legend.title = ggplot2::element_blank(),
+    text=ggplot2::element_text(size=12, face="bold",color="#000000"),
+    axis.text=ggplot2::element_text(color="#000000")
+  )
+  
+
+```
+
+
+## Variation of Ki67 across cores
+We can also look at Ki67 percent positivity. Note this is a stricter comparison since we are looking at percent positivity and not categories.
+
+```{r}
+#| label: fig-ki67-across-cores-by-cohort
+#| fig-cap: Boxplot of Ki67 percent positive scores (max-min) for the same patient (multiple cores) by cohort. No differences are seen across cohorts.
+#| 
+ggpubr::ggboxplot(
+  brtma_core_by_patient, x = "cohort", y= "ki67_diffs",
+  fill = "cohort",
+  xlab="", ylab="Difference in percent positivity (Ki67)",
+  add="jitter",
+  palette = "Set1",
+  bxp.errorbar = TRUE
+) +
+  ggplot2::theme(
+    legend.title = ggplot2::element_blank()
+  ) +
+  ggpubr::stat_compare_means()
+
+```
+
+```{r}
+#| label: fig-ki67-across-cores
+#| fig-cap: Boxplot of Ki67 percent positive scores (max-min) for the same patient (multiple cores) across all cohorts. 
+#| 
+ggpubr::ggboxplot(
+  brtma_core_by_patient, x = 1, y= "ki67_diffs",fill="red",
+  xlab="", ylab="Difference in percent positivity (Ki67)",
+  add="jitter",
+  palette = "Set1",
+  bxp.errorbar = TRUE
+) +
+  ggplot2::theme(
+    legend.title = ggplot2::element_blank(),
+    axis.line.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    axis.text.x = ggplot2::element_blank()
+  ) 
+
+```
+
+
+We can also examine the number of cores/patient. Note that each stain may have failures, resulting in 0 cores for a specific stain for a specific patient or in the case of two patients, no viable cores.
+```{r}
+#| label: tbl-ki67-num-cores
+#| tbl-cap: Summary of number of Ki67-stained cores per patient (by cohort). Note that some may have no cores, as these patients only have other stains successfully called. In the case of two patients (37, 167) there were no viable cores.
+
+gtsummary::tbl_summary(
+  brtma_core_by_patient, 
+  include="ki67_number_of_cores",
+  by="cohort",
+  label = list(ki67_number_of_cores="Ki67 Cores/Patient")
+) |>
+  gtsummary::add_overall()
+```
+
+
 
 
 # HR/HER2 status
@@ -1289,4 +1589,174 @@ invisible(dev.off())
 ```
 
 
+# PAM50 vs Subtypes
+We can also view the PAM50 scores vs clinical subtypes independently for each cohort.
+First we need to verify that the clinical status (HR/HER2) per patient is consistent. Not all cores are consistent (see `brtma_tnbc_mismatched`)
 
+```{r}
+#| label: tbl-brtma-tnbc-mismatched
+#| tbl-cap: Study patient ID's with mismatched core tnbc calls.
+
+
+# First calculate the mismatches (all are count of 2)
+brtma_tnbc_mismatched <- brtma |>
+  dplyr::select(cohort, study_patient_id, tnbc_category) |>
+  dplyr::filter(!is.na(tnbc_category)) |>
+  dplyr::distinct() |>
+  dplyr::group_by(study_patient_id) |>
+  dplyr::summarize(n = dplyr::n()) |>
+  dplyr::filter(n>1) 
+
+gt::gt(brtma_tnbc_mismatched)
+
+# Then extract from brtma the non-duplicate patient-level details of tnbc
+nodups_brtma <- brtma |>
+  dplyr::filter(!is.na(tnbc_category)) |>
+  dplyr::filter(!study_patient_id %in% brtma_tnbc_mismatched$study_patient_id) |>
+  dplyr::select(study_patient_id, tnbc_category) |>
+  dplyr::distinct()
+
+# Finally, create a pam50 based on nodups and having a pam50 score.
+pam50 <- readRDS(here::here("data/pam50.rds"))
+
+
+# Clean up the pam50 (remove missing) and make unique
+# since multiple cores match to the same PAM50 call 
+# (PAM50 is from RNAseq of bulk tumor, one measurement
+# per patient).
+pam50 <- pam50 |>
+  dplyr::filter(!is.na(pam50_subtype)) |>
+  dplyr::filter(!study_patient_id %in% brtma_tnbc_mismatched$study_patient_id) |>
+  dplyr::select(cohort, pam50_subtype, study_patient_id) |>
+  dplyr::distinct() |>
+  dplyr::mutate(cohort=forcats::fct_drop(cohort)) |>
+  dplyr::inner_join(
+    nodups_brtma,
+    by=c("study_patient_id"="study_patient_id"),
+    relationship="one-to-one"
+  )  
+```
+
+
+```{r}
+#| label: tbl-pam50-tnbc-cohort-summaries
+#| tbl-cap: Summary of PAM50  types by HR/HER2 status with cohort as separate table.
+#| 
+
+
+# For each cohort, generate the table.
+pam50_summary_tables <- purrr::map(levels(pam50$cohort), \(.cohort) {
+  tbl_hdr <- glue::glue("**{.cohort}**")
+  gtsummary::tbl_summary(
+    dplyr::filter(pam50, cohort ==  .cohort),
+    by="tnbc_category", 
+    include="pam50_subtype",
+    label=list("pam50_subtype"="PAM50"),
+    missing_text="Not Evaluable",
+    percent="column"
+  ) |>
+    gtsummary::modify_header(label="") |>
+    gtsummary::modify_spanning_header(
+      gtsummary::all_stat_cols() ~ tbl_hdr
+    ) |>
+    gtsummary::bold_labels() |>
+    gtsummary::add_p() |>
+    gtsummary::add_overall()
+  
+})
+
+
+```
+
+```{r}
+
+pam50_summary_tables[[1]]
+pam50_summary_tables[[2]]
+pam50_summary_tables[[3]]
+
+```
+Combined table
+```{r}
+#| label: tbl-pam50-tnbc-cohort-summary
+#| tbl-cap: Summary of PAM50  types by HR/HER2 status and cohort.
+#| 
+pam50_summary_table <- gtsummary::tbl_strata(
+  pam50,
+  strata = tnbc_category,
+  .tbl_fun = \(.x) {
+    gtsummary::tbl_summary(.x, by = "cohort",include="pam50_subtype",percent="column") |>   
+      gtsummary::add_p()
+  }
+) 
+pam50_summary_table
+```
+
+```{r}
+# Export as tables for manuscript
+gtsummary::as_hux_xlsx(
+  pam50_summary_table, 
+  file = here::here("delivery/pam50_summary_table_hrher2.xlsx")
+)
+gtsummary::as_flex_table(pam50_summary_table) |>
+  flextable::save_as_docx(path=here::here("delivery/pam50_summary_table_hrher2.docx"))
+```
+
+# PAM50 vs. Ki67
+Similarly, we can look at Ki67 scores (positivity) compared to PAM50 subtypes (by cohort). Here we look at percent positive. Since there are multiple cores per patient, we collapse to the maximum Ki67 score observed.
+
+```{r}
+# Then extract from brtma the non-duplicate patient-level details of tnbc
+maxki67_brtma <- brtma |>
+  dplyr::filter(!is.na(ki67_percent_positive)) |>
+  dplyr::group_by(study_patient_id) |>
+  dplyr::slice_max(order_by=ki67_percent_positive,n=1) |>
+  dplyr::select(study_patient_id, ki67_percent_positive) |>
+  dplyr::distinct()
+
+# Finally, create a pam50 based on ki67 entries
+pam50 <- readRDS(here::here("data/pam50.rds"))
+
+
+# Clean up the pam50 (remove missing) and make unique
+# since multiple cores match to the same PAM50 call 
+# (PAM50 is from RNAseq of bulk tumor, one measurement
+# per patient).
+pam50 <- pam50 |>
+  dplyr::filter(
+    !is.na(pam50_subtype)
+  ) |>
+  dplyr::select(cohort, pam50_subtype, study_patient_id) |>
+  dplyr::distinct() |>
+  dplyr::mutate(cohort=forcats::fct_drop(cohort)) |>
+  dplyr::inner_join(
+    maxki67_brtma,
+    by=c("study_patient_id"="study_patient_id"),
+    relationship="one-to-one"
+  ) 
+
+```
+
+Now we can make a boxplot of the percent positive Ki67.
+
+```{r}
+
+
+ggpubr::ggboxplot(
+  pam50,
+  x = "pam50_subtype",
+  y = "ki67_percent_positive",
+  fill="cohort",
+  bxp.errorbar = TRUE,
+  ylab = "Ki-67 Percent Positive Nuclei",
+  palette = "Set1",
+  xlab = "", 
+  na.rm = TRUE
+) +
+  ggplot2::theme(
+    #legend.position="none",
+    legend.title = ggplot2::element_blank(),
+    text=ggplot2::element_text(size=12, face="bold",color="#000000"),
+    axis.text=ggplot2::element_text(color="#000000")
+  ) 
+
+```
